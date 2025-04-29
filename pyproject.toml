@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "olympiad-tracker"
+version = "0.1.0"
+description = "Система хранения и статистического анализа результатов работы учеников на занятиях по олимпиадной математике."
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+  {name = "Александра Манжина", email = "sashamanzhina@mail.ru"},
+]
+
+
+dependencies = [
+    "streamlit >= 1.20",
+    "sqlalchemy >= 1.4",
+    "pandas >= 1.3",
+]
