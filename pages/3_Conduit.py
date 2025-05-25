@@ -90,7 +90,7 @@ try:
                 discussed_labels_current = [col.column_label for col in columns_in_lesson if col.is_discussed]
                 selected_discussed_labels = st.multiselect(
                     "Выберите задачи, которые были разобраны:",
-                    options=column_options_select.keys(),
+                    options=list(column_options_select.keys()),
                     default=discussed_labels_current,
                     key=f"discuss_multiselect_{selected_lesson_id}"
                 )
@@ -182,7 +182,12 @@ try:
                         changed_cells = changed_cells[changed_cells]
                         changed_indices = changed_cells.index
                     else:
-                        changed_indices = pd.MultiIndex.from_tuples([])
+                        level_0_name = original_df_for_compare.index.name if original_df_for_compare.index.name else "index"
+                        level_1_name = original_df_for_compare.columns.name if original_df_for_compare.columns.name else "columns"
+                        changed_indices = pd.MultiIndex.from_tuples(
+                            [],
+                            names=[level_0_name, level_1_name]
+                        )
 
                     if not changed_indices.empty:
                         prog_text = "Сохранение изменений..."
@@ -195,14 +200,20 @@ try:
 
                             student_id = student_name_to_id.get(student_name)
                             column_id = column_label_to_id.get(col_label)
-                            solved_status = edited_df_for_compare.loc[student_name, col_label]
+                            
+                            current_value_in_edited_df = edited_df_for_compare.loc[student_name, col_label]
+                            if isinstance(current_value_in_edited_df, pd.Series):
+                                solved_status = current_value_in_edited_df.item() 
+                            else:
+                                solved_status = bool(current_value_in_edited_df)
+
 
                             if student_id is None or column_id is None:
                                 st.warning(f"Не удалось найти ID для {student_name} или {col_label}. Пропускаем.")
                                 continue
 
                             try:
-                                if solved_status == True:
+                                if solved_status:
                                     crud.add_result(db, student_id, column_id, selected_lesson_id)
                                     save_counter += 1
                                 else:

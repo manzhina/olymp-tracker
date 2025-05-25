@@ -24,14 +24,32 @@ try:
         with st.form("new_group_form", clear_on_submit=True):
             new_group_name = st.text_input("Название группы*")
             new_group_desc = st.text_area("Описание")
+
+            events = crud.get_all_events(db)
+            event_options = {f"{event.event_name} ({event.event_type.value})": event.event_id for event in events}
+            event_options_with_none = {"Нет (независимая группа)": None}
+            event_options_with_none.update(event_options)
+            
+            selected_event_label = st.selectbox(
+                "Привязать к мероприятию (опционально):",
+                options=list(event_options_with_none.keys())
+            )
+            selected_event_id = event_options_with_none.get(selected_event_label)
+
             submitted_group = st.form_submit_button("Создать группу")
             if submitted_group:
                 if not new_group_name:
                     st.warning("Название группы обязательно.")
                 else:
                     try:
-                        created_group = crud.create_group(db, group_name=new_group_name, description=new_group_desc)
+                        created_group = crud.create_group(
+                            db,
+                            group_name=new_group_name,
+                            description=new_group_desc,
+                            event_id=selected_event_id
+                        )
                         st.success(f"Группа '{created_group.group_name}' успешно создана!")
+                        st.rerun()
                     except Exception as e:
                         if "UNIQUE constraint failed: StudyGroups.group_name" in str(e):
                             st.error(f"Ошибка: Группа с названием '{new_group_name}' уже существует.")
@@ -46,8 +64,17 @@ try:
         st.info("Пока нет ни одной группы.")
     else:
         for group in groups:
-            with st.expander(f"Группа: {group.group_name}"):
+            group_expander_title = f"Группа: {group.group_name}"
+            if group.event_id:
+                event = crud.get_event_by_id(db, group.event_id)
+                if event:
+                    group_expander_title += f" (Мероприятие: {event.event_name})"
+            
+            with st.expander(group_expander_title):
                 st.caption(f"ID: {group.group_id} | Описание: {group.description or 'Нет'}")
+                if group.event_id and event:
+                     st.caption(f"Связано с мероприятием: {event.event_name} (ID: {event.event_id})")
+
                 st.subheader("Занятия в этой группе:")
                 lessons = crud.get_lessons_for_group(db, group.group_id)
 
@@ -67,14 +94,15 @@ try:
 
                 st.subheader("➕ Добавить новое занятие в группу")
                 with st.form(key=f"new_lesson_form_{group.group_id}", clear_on_submit=True):
-                    lesson_date = st.date_input("Дата занятия*", value=datetime.date.today())
-                    lesson_topic = st.text_input("Тема занятия*")
+                    lesson_date = st.date_input("Дата занятия*", value=datetime.date.today(), key=f"date_{group.group_id}")
+                    lesson_topic = st.text_input("Тема занятия*", key=f"topic_{group.group_id}")
                     lesson_subject = st.selectbox(
                         "Направленность*",
                         options=[area.value for area in SubjectAreaEnum],
-                        format_func=lambda x: x
+                        format_func=lambda x: x,
+                        key=f"subject_{group.group_id}"
                     )
-                    lesson_link = st.text_input("Ссылка на листок")
+                    lesson_link = st.text_input("Ссылка на листок", key=f"link_{group.group_id}")
                     submitted_lesson = st.form_submit_button("Добавить занятие")
 
                     if submitted_lesson:

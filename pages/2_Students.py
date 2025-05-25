@@ -21,7 +21,7 @@ try:
     groups = crud.get_all_groups(db)
     group_options = {group.group_name: group.group_id for group in groups}
     selected_group_name = st.selectbox(
-        "Выберите группу:",
+        "Выберите группу для просмотра учеников и добавления новых:",
         options=[""] + list(group_options.keys()),
         key="student_page_group_selector"
     )
@@ -45,8 +45,8 @@ try:
                     "Фамилия": s.last_name,
                     "Имя": s.first_name,
                     "Школа": s.school_name or "-",
-                    "Задач решено": total_solved,
-                    "Общий балл": total_score
+                    "Задач решено (группа)": total_solved,
+                    "Общий балл (группа)": total_score
                 })
                 prog_bar.progress((i + 1) / total_students, text=f"{prog_text} ({i+1}/{total_students})")
             prog_bar.empty()
@@ -75,10 +75,14 @@ try:
                     student_to_add = None
 
                     if found_students:
-                        # TODO: В идеале - дать пользователю выбрать, если найдено несколько
-                        student_to_add = found_students[0]
-                        st.info(f"Найден существующий ученик: {student_to_add.last_name} {student_to_add.first_name} (ID: {student_to_add.student_id}). Добавляем его в группу.")
-                    else:
+                        if len(found_students) == 1:
+                             student_to_add = found_students[0]
+                             st.info(f"Найден существующий ученик: {student_to_add.last_name} {student_to_add.first_name} (ID: {student_to_add.student_id}).")
+                        else:
+                            st.warning(f"Найдено несколько учеников с именем {s_first_name} {s_last_name}. Пожалуйста, уточните школу или используйте уникальные данные.")
+                            student_to_add = None
+                    
+                    if not student_to_add and not found_students:
                         try:
                             student_to_add = crud.create_student(db, first_name=s_first_name, last_name=s_last_name, school_name=s_school if s_school else None)
                             st.success(f"Создан новый ученик: {student_to_add.last_name} {student_to_add.first_name} (ID: {student_to_add.student_id}).")
@@ -91,14 +95,31 @@ try:
 
                     if student_to_add:
                         try:
-                            crud.add_student_to_group(db, student_id=student_to_add.student_id, group_id=selected_group_id)
-                            st.success(f"Ученик '{student_to_add.last_name} {student_to_add.first_name}' успешно добавлен/уже состоит в группе '{selected_group_name}'.")
-                            st.rerun()
+                            participation = crud.add_student_to_group(db, student_id=student_to_add.student_id, group_id=selected_group_id)
+                            if participation:
+                                st.success(f"Ученик '{student_to_add.last_name} {student_to_add.first_name}' успешно добавлен/уже состоит в группе '{selected_group_name}'.")
+                                st.rerun()
+                            else:
+                                st.warning(f"Ученик '{student_to_add.last_name} {student_to_add.first_name}' уже состоит в группе.")
                         except Exception as add_e:
                              st.error(f"Ошибка при добавлении ученика в группу: {add_e}")
                              st.exception(add_e)
     else:
-        st.warning("Пожалуйста, выберите группу из списка выше.")
+        st.warning("Пожалуйста, выберите группу из списка выше, чтобы управлять учениками.")
+    
+    st.divider()
+    st.header("Все ученики в базе данных")
+    all_db_students = crud.get_all_students(db)
+    if all_db_students:
+        all_student_data = [{
+            "ID": s.student_id, "Фамилия": s.last_name, "Имя": s.first_name, 
+            "Школа": s.school_name or "-", 
+            "Дата регистрации": s.registration_date.strftime('%Y-%m-%d %H:%M')
+        } for s in all_db_students]
+        st.dataframe(pd.DataFrame(all_student_data).set_index("ID"), use_container_width=True)
+    else:
+        st.info("В базе данных пока нет ни одного ученика.")
+
 
 finally:
     if 'db' in locals() and db:

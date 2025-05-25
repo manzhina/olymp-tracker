@@ -43,7 +43,6 @@ def calculate_student_lesson_score(db: Session, student_id: int, lesson_id: int,
     return score
 
 def calculate_student_lesson_solved_count(db: Session, student_id: int, lesson_id: int) -> int:
-    """Рассчитывает количество задач, решенных студентом на занятии."""
     count = db.query(func.count(Result.result_id)).filter(
         Result.student_id == student_id,
         Result.lesson_id == lesson_id
