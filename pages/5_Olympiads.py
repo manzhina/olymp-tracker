@@ -28,22 +28,50 @@ try:
     with col1:
         st.header("Список Олимпиад")
         
-        subjects = list(set(o.subject for o in crud.get_all_olympiads(db)))
+        olympiads_all = crud.get_all_olympiads(db)
+        subjects = sorted(list(set(o.subject for o in olympiads_all)))
         subject_filter = st.selectbox("Фильтр по предмету:", options=["Все"] + subjects, key="olympiad_subject_filter")
         
-        olympiads_query = crud.get_all_olympiads(db, subject_filter=None if subject_filter == "Все" else subject_filter)
+        if subject_filter == "Все":
+            olympiads_query = olympiads_all
+        else:
+            olympiads_query = [o for o in olympiads_all if o.subject == subject_filter]
         
         if not olympiads_query:
             st.info("Пока нет ни одной олимпиады (или по выбранному фильтру).")
         else:
             olympiad_names = [f"{o.olympiad_name} ({o.olympiad_date.strftime('%Y-%m-%d')})" for o in olympiads_query]
+            
+            default_radio_index = 0
+            if st.session_state.selected_olympiad_id:
+                try:
+                    selected_olympiad_object = next(o for o in olympiads_query if o.olympiad_id == st.session_state.selected_olympiad_id)
+                    selected_olympiad_name_for_radio = f"{selected_olympiad_object.olympiad_name} ({selected_olympiad_object.olympiad_date.strftime('%Y-%m-%d')})"
+                    default_radio_index = olympiad_names.index(selected_olympiad_name_for_radio)
+                except (StopIteration, ValueError):
+                    st.session_state.selected_olympiad_id = None
+                    default_radio_index = 0
+            
             selected_olympiad_name_display = st.radio(
                 "Выберите олимпиаду для просмотра деталей:",
                 options=olympiad_names,
+                index=default_radio_index,
                 key="olympiad_selector_radio"
             )
             if selected_olympiad_name_display:
-                st.session_state.selected_olympiad_id = olympiads_query[olympiad_names.index(selected_olympiad_name_display)].olympiad_id
+                name_to_find = selected_olympiad_name_display.split(" (")[0]
+                date_str_to_find = selected_olympiad_name_display.split(" (")[1][:-1]
+                
+                found_olympiad = None
+                for o_idx, o_name_full in enumerate(olympiad_names):
+                    if o_name_full == selected_olympiad_name_display:
+                        found_olympiad = olympiads_query[o_idx]
+                        break
+                
+                if found_olympiad:
+                     st.session_state.selected_olympiad_id = found_olympiad.olympiad_id
+                else:
+                    st.session_state.selected_olympiad_id = None
 
 
         with st.expander("➕ Добавить новую олимпиаду", expanded=False):
@@ -81,7 +109,6 @@ try:
                                 st.error(f"Ошибка: Олимпиада с таким названием, датой и предметом уже существует.")
                             else:
                                 st.error(f"Ошибка при добавлении олимпиады: {e}")
-                                st.exception(e)
     
     with col2:
         if st.session_state.selected_olympiad_id:
@@ -127,17 +154,16 @@ try:
                                         olympiad_id=olympiad.olympiad_id,
                                         award=award_enum,
                                         score=score,
-                                        details=details,
-                                        result_document_link=doc_link
+                                        details=details if details else None,
+                                        result_document_link=doc_link if doc_link else None
                                     )
                                     st.success(f"Результат для '{selected_student_label}' успешно добавлен/обновлен.")
                                     st.rerun()
                                 except Exception as e:
-                                    if "UNIQUE constraint failed" in str(e): # Be more specific if possible
+                                    if "UNIQUE constraint failed" in str(e): 
                                         st.error("Ошибка: Такой результат (ученик, олимпиада, детали) уже существует.")
                                     else:
                                         st.error(f"Ошибка при добавлении результата: {e}")
-                                        st.exception(e)
                 
                 st.divider()
                 st.subheader("Список результатов по этой олимпиаде")
@@ -145,22 +171,28 @@ try:
                 if results_for_olympiad:
                     results_data = []
                     for res in results_for_olympiad:
-                        student = crud.get_student_by_id(db, res.student_id) # Could be optimized
+                        student = crud.get_student_by_id(db, res.student_id) 
                         results_data.append({
                             "ID": res.olympiad_result_id,
                             "Фамилия": student.last_name if student else "N/A",
                             "Имя": student.first_name if student else "N/A",
                             "Награда": res.award.value,
-                            "Балл": res.score if res.score is not None else "-",
+                            "Балл": res.score,
                             "Детали": res.details or "-",
                             "Ссылка": res.result_document_link or "-"
                         })
-                    st.dataframe(pd.DataFrame(results_data).set_index("ID"), use_container_width=True)
+                    
+                    df_results = pd.DataFrame(results_data)
+                    for col_name in ["Фамилия", "Имя", "Награда", "Детали", "Ссылка"]:
+                         if col_name in df_results.columns:
+                            df_results[col_name] = df_results[col_name].astype(str)                    
+                    st.dataframe(df_results.set_index("ID"), use_container_width=True)
                 else:
                     st.info("По этой олимпиаде пока нет внесенных результатов.")
 
             else:
-                st.info("Олимпиада не найдена или была удалена.")
+                st.info("Олимпиада не найдена или была удалена (возможно, из-за смены фильтра).")
+                st.session_state.selected_olympiad_id = None
         else:
             st.info("Выберите олимпиаду из списка слева для просмотра деталей.")
 
