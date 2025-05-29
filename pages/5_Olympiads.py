@@ -22,6 +22,8 @@ db: Session = next(db_session_generator)
 try:
     if 'selected_olympiad_id' not in st.session_state:
         st.session_state.selected_olympiad_id = None
+    if 'previous_subject_filter' not in st.session_state:
+        st.session_state.previous_subject_filter = "Все"
 
     col1, col2 = st.columns([1, 2])
 
@@ -30,49 +32,63 @@ try:
         
         olympiads_all = crud.get_all_olympiads(db)
         subjects = sorted(list(set(o.subject for o in olympiads_all)))
-        subject_filter = st.selectbox("Фильтр по предмету:", options=["Все"] + subjects, key="olympiad_subject_filter")
         
-        if subject_filter == "Все":
+        current_subject_filter = st.selectbox(
+            "Фильтр по предмету:", 
+            options=["Все"] + subjects, 
+            key="olympiad_subject_filter_select"
+        )
+
+        if current_subject_filter != st.session_state.get('previous_filter_value_for_olympiads', current_subject_filter) :
+            st.session_state.selected_olympiad_id = None
+            st.session_state.previous_filter_value_for_olympiads = current_subject_filter
+
+        st.session_state.previous_filter_value_for_olympiads = current_subject_filter
+
+
+        if current_subject_filter == "Все":
             olympiads_query = olympiads_all
         else:
-            olympiads_query = [o for o in olympiads_all if o.subject == subject_filter]
-        
+            olympiads_query = [o for o in olympiads_all if o.subject == current_subject_filter]
+
+        valid_ids_in_query = {o.olympiad_id for o in olympiads_query}
+        if st.session_state.selected_olympiad_id not in valid_ids_in_query:
+            if st.session_state.selected_olympiad_id is not None:
+                 st.session_state.selected_olympiad_id = None
+
         if not olympiads_query:
             st.info("Пока нет ни одной олимпиады (или по выбранному фильтру).")
         else:
             olympiad_names = [f"{o.olympiad_name} ({o.olympiad_date.strftime('%Y-%m-%d')})" for o in olympiads_query]
-            
+            name_to_id_map = {name: olympiads_query[i].olympiad_id for i, name in enumerate(olympiad_names)}
+            id_to_name_map = {v: k for k,v in name_to_id_map.items()}
+
+
             default_radio_index = 0
-            if st.session_state.selected_olympiad_id:
+            if st.session_state.selected_olympiad_id in id_to_name_map:
                 try:
-                    selected_olympiad_object = next(o for o in olympiads_query if o.olympiad_id == st.session_state.selected_olympiad_id)
-                    selected_olympiad_name_for_radio = f"{selected_olympiad_object.olympiad_name} ({selected_olympiad_object.olympiad_date.strftime('%Y-%m-%d')})"
-                    default_radio_index = olympiad_names.index(selected_olympiad_name_for_radio)
-                except (StopIteration, ValueError):
+                    name_of_selected_id = id_to_name_map[st.session_state.selected_olympiad_id]
+                    default_radio_index = olympiad_names.index(name_of_selected_id)
+                except (KeyError, ValueError):
                     st.session_state.selected_olympiad_id = None
                     default_radio_index = 0
+            else:
+                 st.session_state.selected_olympiad_id = None
+                 default_radio_index = 0
+
             
-            selected_olympiad_name_display = st.radio(
+            selected_olympiad_name_display_from_radio = st.radio(
                 "Выберите олимпиаду для просмотра деталей:",
                 options=olympiad_names,
                 index=default_radio_index,
-                key="olympiad_selector_radio"
+                key="olympiad_selector_radio_key"
             )
-            if selected_olympiad_name_display:
-                name_to_find = selected_olympiad_name_display.split(" (")[0]
-                date_str_to_find = selected_olympiad_name_display.split(" (")[1][:-1]
-                
-                found_olympiad = None
-                for o_idx, o_name_full in enumerate(olympiad_names):
-                    if o_name_full == selected_olympiad_name_display:
-                        found_olympiad = olympiads_query[o_idx]
-                        break
-                
-                if found_olympiad:
-                     st.session_state.selected_olympiad_id = found_olympiad.olympiad_id
-                else:
-                    st.session_state.selected_olympiad_id = None
+            
+            newly_selected_id_by_radio = name_to_id_map.get(selected_olympiad_name_display_from_radio)
 
+            if newly_selected_id_by_radio is not None and newly_selected_id_by_radio != st.session_state.selected_olympiad_id:
+                st.session_state.selected_olympiad_id = newly_selected_id_by_radio
+                st.rerun()
 
         with st.expander("➕ Добавить новую олимпиаду", expanded=False):
             with st.form("new_olympiad_form", clear_on_submit=True):
@@ -94,15 +110,13 @@ try:
                         try:
                             ol_level_enum = OlympiadLevelEnum(ol_level_value)
                             created_ol = crud.create_olympiad(
-                                db,
-                                olympiad_name=ol_name,
-                                olympiad_date=ol_date,
-                                level=ol_level_enum,
-                                subject=ol_subject,
-                                organizer=ol_organizer
+                                db, olympiad_name=ol_name, olympiad_date=ol_date,
+                                level=ol_level_enum, subject=ol_subject, organizer=ol_organizer
                             )
                             st.success(f"Олимпиада '{created_ol.olympiad_name}' успешно добавлена!")
                             st.session_state.selected_olympiad_id = created_ol.olympiad_id
+                            if current_subject_filter != "Все" and created_ol.subject != current_subject_filter:
+                                pass
                             st.rerun()
                         except Exception as e:
                             if "UNIQUE constraint failed: Olympiads.olympiad_name, Olympiads.olympiad_date, Olympiads.subject" in str(e):
@@ -142,18 +156,15 @@ try:
                         submitted_result = st.form_submit_button("Добавить результат")
 
                         if submitted_result:
-                            if not selected_student_label or not award_value:
+                            if not selected_student_label or not award_value: 
                                 st.warning("Ученик и награда обязательны.")
                             else:
                                 student_id_to_add = student_options[selected_student_label]
                                 award_enum = AwardEnum(award_value)
                                 try:
                                     crud.add_olympiad_result(
-                                        db,
-                                        student_id=student_id_to_add,
-                                        olympiad_id=olympiad.olympiad_id,
-                                        award=award_enum,
-                                        score=score,
+                                        db, student_id=student_id_to_add, olympiad_id=olympiad.olympiad_id,
+                                        award=award_enum, score=score, 
                                         details=details if details else None,
                                         result_document_link=doc_link if doc_link else None
                                     )
@@ -185,14 +196,15 @@ try:
                     df_results = pd.DataFrame(results_data)
                     for col_name in ["Фамилия", "Имя", "Награда", "Детали", "Ссылка"]:
                          if col_name in df_results.columns:
-                            df_results[col_name] = df_results[col_name].astype(str)                    
+                            df_results[col_name] = df_results[col_name].astype(str)
                     st.dataframe(df_results.set_index("ID"), use_container_width=True)
                 else:
                     st.info("По этой олимпиаде пока нет внесенных результатов.")
-
             else:
-                st.info("Олимпиада не найдена или была удалена (возможно, из-за смены фильтра).")
-                st.session_state.selected_olympiad_id = None
+                st.info("Выбранная олимпиада не найдена. Возможно, она была удалена.")
+                if st.session_state.selected_olympiad_id is not None:
+                    st.session_state.selected_olympiad_id = None
+                    st.rerun()
         else:
             st.info("Выберите олимпиаду из списка слева для просмотра деталей.")
 
